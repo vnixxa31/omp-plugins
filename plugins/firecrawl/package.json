@@ -1,0 +1,23 @@
+{
+	"name": "omp-plugin-firecrawl",
+	"version": "0.1.0",
+	"description": "Native omp tools for Firecrawl: replace the Firecrawl MCP server with locally registered extension tools (scrape, search, crawl, map, parse, agent, interact, monitors, research, credit usage).",
+	"license": "AGPL-3.0-or-later",
+	"author": {
+		"name": "Violet Nixxa"
+	},
+	"repository": {},
+	"engines": {
+		"bun": ">=1.0"
+	},
+	"scripts": {
+		"bundle": "bun build src/index.ts --outdir dist --target bun",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"firecrawl": "^4.52"
+	},
+	"omp": {
+		"extensions": ["./src/index.ts"]
+	}
+}

@@ -1,5 +1,17 @@
 {
 	"name": "omp-plugins",
 	"owner": { "name": "Violet Nixxa" },
-	"plugins": []
+	"plugins": [
+		{
+			"name": "firecrawl",
+			"description": "Native omp tools for Firecrawl: scrape, search, crawl, map, parse, agent research, browser interaction, monitors, research indexes, and credit usage — no MCP server required.",
+			"source": "./plugins/firecrawl",
+			"author": { "name": "Violet Nixxa" },
+			"license": "AGPL-3.0-or-later",
+			"category": "productivity",
+			"tags": ["firecrawl", "web", "search", "scrape", "research"],
+			"homepage": "https://github.com/firecrawl/firecrawl-mcp-server",
+			"version": "0.1.0"
+		}
+	]
 }
