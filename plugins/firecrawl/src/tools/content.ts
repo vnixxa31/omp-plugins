@@ -16,6 +16,33 @@ import type { AlexandriaCall, CrawlOptions, MapOptions, ParseOptions, ScrapeOpti
 import { ToolError, api, withAbort } from "../api";
 import { defineTool, documentText } from "../tool";
 
+/**
+ * Reject a bare `"json"` entry in `formats` locally: the SDK validator only
+ * names the object form, so the message states it directly (§5 rule 3).
+ */
+function assertNoBareJsonFormat(tool: string, formats: readonly unknown[] | undefined): void {
+	if (!formats?.some((format) => format === "json")) return;
+	throw new ToolError(
+		`${tool}: the bare string "json" is not a valid format — use the object form { type: "json", prompt?, schema? } in \`formats\``,
+	);
+}
+
+/**
+ * The v2 API rejects `jsonOptions` with `400 BAD_REQUEST` (unrecognized key),
+ * both at the top level and inside `scrapeOptions`. Declaring the field keeps
+ * Zod from stripping it silently; this guard turns it into one actionable
+ * error before any request leaves the process.
+ */
+function assertNoJsonOptions(
+	tool: string,
+	options: { jsonOptions?: unknown; scrapeOptions?: { jsonOptions?: unknown } },
+): void {
+	if (options.jsonOptions === undefined && options.scrapeOptions?.jsonOptions === undefined) return;
+	throw new ToolError(
+		`${tool}: the v2 API rejects \`jsonOptions\` — use \`formats: [{ type: "json", prompt?, schema? }]\` instead`,
+	);
+}
+
 export function registerContentTools(pi: ExtensionAPI): void {
 	const z = pi.zod;
 
@@ -75,6 +102,15 @@ export function registerContentTools(pi: ExtensionAPI): void {
 		.describe("Persistent browser profile to load for this request.")
 		.optional();
 
+	// Declared only to reject it loudly: the v2 API returns 400 when this key
+	// is present, so leaving it undeclared made Zod strip it silently.
+	const jsonOptionsField = z
+		.unknown()
+		.describe(
+			'Not supported: the v2 API rejects `jsonOptions`. Use `formats: [{ type: "json", prompt?, schema? }]` instead; setting this field returns an error.',
+		)
+		.optional();
+
 	// Option fields shared verbatim by ScrapeOptions and ParseOptions.
 	const commonFields = {
 		headers: z.record(z.string()).describe("Additional HTTP headers to send with the request.").optional(),
@@ -102,13 +138,14 @@ export function registerContentTools(pi: ExtensionAPI): void {
 	};
 
 	// Shared scrape option shape: every ScrapeOptions field except
-	// integration/origin/toolDetail; spread into firecrawl_scrape (which adds
-	// toolDetail) and into firecrawl_search's scrapeOptions (which omits it).
+	// integration/origin/toolDetail, plus a declared-and-rejected jsonOptions;
+	// spread into firecrawl_scrape (which adds toolDetail) and into
+	// firecrawl_search's scrapeOptions (which omits it).
 	const scrapeShape = {
 		formats: z
 			.array(z.union([z.string(), z.record(z.unknown())]))
 			.describe(
-				'Output formats as strings or option objects: markdown, html, rawHtml, links, images, screenshot, summary, changeTracking, json, attributes, branding, product, menu, audio, video (json: prompt/schema; screenshot: fullPage/quality/viewport; changeTracking: modes/schema/prompt/tag; attributes: selectors).',
+				'Output formats: plain strings markdown, html, rawHtml, links, images, screenshot, summary, changeTracking, branding, product, menu, audio, video — or option objects such as { type: "screenshot", fullPage?, quality?, viewport? }, { type: "attributes", selectors }, { type: "changeTracking", modes?, prompt?, schema?, tag? }. `json` MUST be the object form { type: "json", prompt?, schema? } (one of prompt or schema is required): the SDK rejects the bare string "json".',
 			)
 			.optional(),
 		waitFor: z.number().describe("Extra time, in milliseconds, to wait for the page to finish loading before extracting.").optional(),
@@ -130,6 +167,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 		storeInCache: z.boolean().describe("Store the result in the Firecrawl cache.").optional(),
 		lockdown: z.boolean().describe("Lockdown mode: restrict media delivery and cached reuse of the result.").optional(),
 		threatProtection: threatProtectionField,
+		jsonOptions: jsonOptionsField,
 		...commonFields,
 	};
 
@@ -196,6 +234,8 @@ Related devices: xd://firecrawl_map, xd://firecrawl_interact.`,
 				if (requestId !== undefined) {
 					throw new ToolError("firecrawl_scrape: `requestId` only applies to an `alexandria` call — remove it for URL scrapes");
 				}
+				assertNoBareJsonFormat("firecrawl_scrape", options.formats);
+				assertNoJsonOptions("firecrawl_scrape", options);
 				return withAbort(api().scrape(url, options as unknown as ScrapeOptions), signal);
 			}
 			if (alexandria === undefined) {
@@ -263,6 +303,7 @@ Related devices: xd://firecrawl_map, xd://firecrawl_agent.`,
 					throw new ToolError(`categories: ["${solo}"] cannot be combined with another category`);
 				}
 			}
+			assertNoJsonOptions("firecrawl_search", params);
 			const { query, ...rest } = params;
 			return withAbort(api().search(params.query, rest as unknown as Omit<SearchRequest, "query">), signal);
 		},
@@ -274,10 +315,11 @@ Related devices: xd://firecrawl_map, xd://firecrawl_agent.`,
 		formats: z
 			.array(z.union([z.string(), z.record(z.unknown())]))
 			.describe(
-				'Output formats as strings or option objects: markdown, html, rawHtml, links, images, summary, json, attributes, product, menu (json: prompt/schema; attributes: selectors; question/highlights: query).',
+				'Output formats: plain strings markdown, html, rawHtml, links, images, summary, attributes, product, menu — or option objects such as { type: "attributes", selectors }. `json` MUST be the object form { type: "json", prompt?, schema? }: parse rejects the bare string "json". screenshot, changeTracking, branding, audio, and video are scrape-only and rejected as strings by parse.',
 			)
 			.optional(),
 		proxy: z.enum(["basic", "auto"]).describe("Proxy tier for the parse: basic or auto.").optional(),
+		jsonOptions: jsonOptionsField,
 		...commonFields,
 	});
 
@@ -294,6 +336,8 @@ Related devices: xd://firecrawl_credit_usage, xd://firecrawl_feedback.`,
 		render: (data, params) => documentText(data, params),
 		run: async (params, signal) => {
 			const { filePath, contentType, ...options } = params;
+			assertNoBareJsonFormat("firecrawl_parse", options.formats);
+			assertNoJsonOptions("firecrawl_parse", options);
 			const file = Bun.file(filePath);
 			if (!(await file.exists())) {
 				throw new ToolError(`firecrawl_parse: no such file: ${filePath}`);
@@ -379,8 +423,10 @@ Returns { id, status, total, completed, data }; a waiter timeout reports its job
 		// `crawl()` is the only SDK method that accepts a signal: on abort the
 		// SDK stops polling and best-effort cancels the remote job (§5.4), so
 		// it is passed natively instead of racing through `withAbort`.
-		run: async ({ url, timeout, ...options }, signal) =>
-			api().crawl(url, { ...(options as unknown as CrawlOptions), timeout: timeout ?? 600, signal }),
+		run: async ({ url, timeout, ...options }, signal) => {
+			assertNoJsonOptions("firecrawl_crawl", options);
+			return api().crawl(url, { ...(options as unknown as CrawlOptions), timeout: timeout ?? 600, signal });
+		},
 	});
 
 	const checkCrawlStatusParameters = z.object({

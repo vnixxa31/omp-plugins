@@ -110,4 +110,14 @@ describe("tool surface", () => {
 			expect(tool.description).toContain("Related devices: xd://firecrawl_");
 		}
 	});
+
+	test("developer_search description scopes license and names the passage fields", () => {
+		const tool = registeredTools().find(candidate => candidate.name === "firecrawl_developer_search");
+		expect(tool).toBeDefined();
+		const description = tool?.description ?? "";
+		expect(description).toContain("truncated");
+		expect(description).toContain("full_tokens_est");
+		expect(description).not.toContain("license disclosure");
+		expect(description).toMatch(/`license`[^\n]*(repo|README)/i);
+	});
 });

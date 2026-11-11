@@ -12,7 +12,7 @@ const DESCRIPTION =
 	"Search public repositories, GitHub issues, merged pull requests, READMEs, and code docs.\n" +
 	"Use it for programming questions that need upstream evidence; use firecrawl_search for news, people, or prices.\n" +
 	"`skills: \"only\"` restricts results to packaged agent-skill evidence.\n" +
-	"Returns ranked passages with citation URLs and license disclosure.\n" +
+	"Ranked passages carry citation URLs, `truncated`, and `full_tokens_est`; `license` comes only from repo/README results, absent on `web:`/`doc:`.\n" +
 	"Related devices: xd://firecrawl_map, xd://firecrawl_crawl.";
 
 export function registerDeveloperTools(pi: ExtensionAPI): void {

@@ -16,13 +16,15 @@ import { registerContentTools } from "./content";
 
 type Executable = {
 	name: string;
+	parameters?: { parse: (value: unknown) => Record<string, unknown> };
+	description?: string;
 	execute: (
 		toolCallId: string,
-		params: any,
+		params: unknown,
 		signal?: AbortSignal,
 		onUpdate?: unknown,
 		ctx?: unknown,
-	) => Promise<{ content: { type: string; text: string }[]; details?: any; isError?: boolean }>;
+	) => Promise<{ content: { type: string; text: string }[]; details?: unknown; isError?: boolean }>;
 };
 
 function contentTools(): Map<string, Executable> {
@@ -46,6 +48,13 @@ function tool(name: string): Executable {
 
 function text(envelope: { content: { text: string }[] }): string {
 	return envelope.content[0]?.text ?? "";
+}
+
+/** Validate exactly as the harness does before `execute` sees the params. */
+function paramsFor(name: string, params: Record<string, unknown>): Record<string, unknown> {
+	const registered = tool(name);
+	if (!registered.parameters) throw new Error(`${name} registered without a schema`);
+	return registered.parameters.parse(params);
 }
 
 const client = api() as unknown as Record<string, unknown>;
@@ -200,6 +209,135 @@ describe("firecrawl_search", () => {
 		expect(seenQuery).toBe("latest bun release");
 		expect(seenOptions).toEqual({ limit: 3, sources: ["web"] });
 		expect(text(result)).toBe('{"web":[{"url":"https://example.com","title":"Example"}]}');
+	});
+});
+
+describe("json format handling", () => {
+	test('rejects the bare string "json" before calling the SDK and names the object form', async () => {
+		let called = false;
+		stub("scrape", async () => {
+			called = true;
+			return {};
+		});
+
+		const result = await tool("firecrawl_scrape").execute("1", {
+			url: "https://example.com",
+			formats: ["json"],
+		});
+
+		expect(called).toBe(false);
+		expect(result.isError).toBe(true);
+		expect(text(result)).toContain('"json"');
+		expect(text(result)).toContain("object");
+	});
+
+	test("keeps a declared jsonOptions so the guard can reject it instead of Zod stripping it", () => {
+		const params = paramsFor("firecrawl_scrape", {
+			url: "https://example.com",
+			jsonOptions: { prompt: "Extract the title" },
+		});
+
+		expect(params.jsonOptions).toEqual({ prompt: "Extract the title" });
+	});
+
+	test("rejects jsonOptions before calling the SDK", async () => {
+		let called = false;
+		stub("scrape", async () => {
+			called = true;
+			return {};
+		});
+
+		const params = paramsFor("firecrawl_scrape", {
+			url: "https://example.com",
+			jsonOptions: { prompt: "Extract the title" },
+		});
+		const result = await tool("firecrawl_scrape").execute("1", params);
+
+		expect(called).toBe(false);
+		expect(result.isError).toBe(true);
+		expect(text(result)).toContain("jsonOptions");
+		expect(text(result)).toContain('formats: [{ type: "json"');
+	});
+
+	test("parse rejects jsonOptions before reading the file", async () => {
+		let called = false;
+		stub("parse", async () => {
+			called = true;
+			return {};
+		});
+		const dir = await mkdtemp(join(tmpdir(), "firecrawl-jsonopts-"));
+		const filePath = join(dir, "doc.pdf");
+		await Bun.write(filePath, "pdf-bytes");
+
+		try {
+			const params = paramsFor("firecrawl_parse", {
+				filePath,
+				jsonOptions: { prompt: "Extract the title" },
+			});
+			const result = await tool("firecrawl_parse").execute("1", params);
+			expect(called).toBe(false);
+			expect(result.isError).toBe(true);
+			expect(text(result)).toContain("jsonOptions");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("search rejects jsonOptions inside scrapeOptions", async () => {
+		let called = false;
+		stub("search", async () => {
+			called = true;
+			return {};
+		});
+
+		const params = paramsFor("firecrawl_search", {
+			query: "example domain",
+			scrapeOptions: { jsonOptions: { prompt: "Extract the title" } },
+		});
+		const result = await tool("firecrawl_search").execute("1", params);
+
+		expect(called).toBe(false);
+		expect(result.isError).toBe(true);
+		expect(text(result)).toContain("jsonOptions");
+	});
+
+	test("crawl rejects jsonOptions inside scrapeOptions", async () => {
+		let called = false;
+		stub("crawl", async () => {
+			called = true;
+			return {};
+		});
+
+		const params = paramsFor("firecrawl_crawl", {
+			url: "https://example.com",
+			scrapeOptions: { jsonOptions: { prompt: "Extract the title" } },
+		});
+		const result = await tool("firecrawl_crawl").execute("1", params);
+
+		expect(called).toBe(false);
+		expect(result.isError).toBe(true);
+		expect(text(result)).toContain("jsonOptions");
+	});
+
+	test('parse rejects the bare string "json" too', async () => {
+		let called = false;
+		stub("parse", async () => {
+			called = true;
+			return {};
+		});
+		const dir = await mkdtemp(join(tmpdir(), "firecrawl-json-"));
+		const filePath = join(dir, "doc.pdf");
+		await Bun.write(filePath, "pdf-bytes");
+
+		try {
+			const result = await tool("firecrawl_parse").execute("1", { filePath, formats: ["json"] });
+			expect(called).toBe(false);
+			expect(result.isError).toBe(true);
+			expect(text(result)).toContain('"json"');
+			expect(text(result)).toContain("object");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 });
 

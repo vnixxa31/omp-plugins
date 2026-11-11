@@ -222,7 +222,7 @@ and `origin` from all schemas; the client owns them.
 | `firecrawl_crawl` | `crawl(url, { …opts, signal, timeout })` | Blocks to terminal state; returns `CrawlJob`. |
 | `firecrawl_check_crawl_status` | `getCrawlStatus(id)` | Single read, no polling. |
 | `firecrawl_developer_search` | `developerSearch(query, opts)` | `skills: "only"` restricts to packaged agent-skill evidence. |
-| `firecrawl_find_tools` | `findTools(opts)` | Zero credits. `level` ∈ `providers`/`groups`/`tools`; no args → categories. |
+| `firecrawl_find_tools` | `findTools(opts)` | Zero credits by contract — a free catalogue call, but **not observable in the response**: there is no credit field, unlike scrape's `creditsUsed`. `level` ∈ `providers`/`groups`/`tools`; no args → categories. |
 | `firecrawl_gov_search` | `govSearch(query, opts)` | `jurisdiction` `"us"`/`"us-<state>"`, `court` (CourtListener id), `courtType`, `cites`, `domain`. |
 | `firecrawl_research_search_papers` | `research.searchPapers(query, opts)` | Paper index, not `search({ categories: ["research"] })`. |
 | `firecrawl_research_inspect_paper` | `research.getPaper(id)` | Detail mode. |
@@ -258,6 +258,24 @@ prefer one. `requestId` may be passed to the Alexandria overload and reused
 with an identical payload when retrying. Per-provider errors are data, not
 tool failures: return them and let the caller retry just the failed providers.
 
+`formats` (in `scrapeShape`, so shared by search's and crawl's
+`scrapeOptions`):
+
+- The SDK rejects the bare string `"json"` locally with `json format must be an
+  object with { type: 'json', prompt, schema }`. `json` is valid only as
+  `{ type: "json", prompt?, schema? }`. The tool rejects the bare string
+  before the call, so the message names `firecrawl_scrape` rather than
+  surfacing an SDK throw.
+- Other format strings (`changeTracking`, `attributes`, `product`, `menu`, …)
+  are not rejected locally by `ensureValidFormats`; they pass through to the
+  API as given.
+- Top-level `jsonOptions` is rejected by the v2 API with `400 BAD_REQUEST`
+  (`unrecognized key(s) jsonOptions`), and the same key inside a search/crawl
+  `scrapeOptions` returns `scrapeOptions: unrecognized key(s) jsonOptions`
+  (both verified live 2026-11-11). The tool therefore declares the field only
+  to reject it with a named `ToolError` instead of letting Zod strip it
+  silently; use `formats: [{ type: "json", prompt?, schema? }]`.
+
 Implementation note: omptype refuses `union([object, array(object)])` at build
 time ("overlapping morph inputs"), so `alexandria` is declared as
 `z.unknown()` with the contract in its description and each call is validated
@@ -287,6 +305,16 @@ tool error, not a silent drop.
 - Missing/unreadable path → one-line tool error with the path.
 - Supported formats come from the SDK (`ParseFormatOption`); there is no
   separate formats-listing tool.
+- Same `json` rule as scrape: the SDK rejects the bare string `"json"` locally
+  and `json` is only valid as `{ type: "json", prompt?, schema? }`; the tool
+  rejects the bare string before the call.
+- `ensureValidParseFormats` is stricter than scrape's validator: it also
+  rejects the bare strings `screenshot`, `changeTracking`, `branding`, `audio`
+  and `video` — those are scrape-only formats. These reach the SDK and surface
+  its one-line error (§4.3); only the `json` string is guarded locally.
+- `jsonOptions` is rejected by the same guard: the field is declared only to
+  fail with a named `ToolError`; use the `{ type: "json", prompt?, schema? }`
+  object inside `formats`.
 
 ### 5.4 `firecrawl_crawl`
 
@@ -340,9 +368,11 @@ builds it:
 
 - `scrapeId` mode is the native path: `interact(scrapeId, { prompt | code })`.
 - `url` mode must scrape first and derive the id from
-  `Document.metadata.scrapeId`, then interact. **Verify this id is present on a
-  real scrape before shipping url mode** (§9); if it is absent there is no
-  SDK-only way to open a session by URL.
+  `Document.metadata.scrapeId`, then interact. This field **is** populated on a
+  plain scrape (verified 2026-11-11: `01a1cced-d41a-7576-8e2d-642fdf706d4d`
+  from a plain `example.com` scrape), so url mode may trust it. The guard
+  stays: a scrape result without `metadata.scrapeId` fails with a `ToolError`
+  naming the field, because there is no SDK-only way to open a session by URL.
 - `scrapeOptions.profile { name, saveChanges }` persists browser state; the
   save happens on `firecrawl_interact_stop`, so say that in the stop
   description.
@@ -436,11 +466,6 @@ it was given, and do not record fixtures for the whole surface.
 
 ## 9. Open questions
 
-- `firecrawl_interact` url mode: shipped with a guard — url mode scrapes first
-  and fails with a `ToolError` naming `metadata.scrapeId` when a plain scrape
-  does not carry it. Still confirm on a live scrape that `metadata.scrapeId` is
-  populated for a plain scrape; if it is not, drop url mode to §6 and keep only
-  the `scrapeId` mode.
 - Essential-set size: five tools is the current budget. If real sessions show
   the model failing to find `map`/`crawl`, promote one tool at a time and
   record the prompt cost here.
