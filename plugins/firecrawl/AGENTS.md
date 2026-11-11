@@ -1,11 +1,13 @@
 # AGENTS.md — Firecrawl tools for omp
 
-**Status (2026-11-10): the five essential tools are implemented.** `src/index.ts`
-registers `src/tools/content.ts` (scrape, search, parse), `src/tools/developer.ts`
-(developer_search) and `src/tools/alexandria.ts` (find_tools) through
-`src/api.ts` + `src/tool.ts`; `bun run typecheck`, `bun run bundle` and
-`bun test` pass. The 22 discoverable tools in §3.2 are still spec-only — do not
-assume they exist, and do not infer contracts from the old MCP README.
+**Status (2026-11-11): all 27 tools are implemented.** `src/index.ts` registers
+`src/tools/content.ts` (scrape, search, parse, map, crawl, check_crawl_status),
+`src/tools/developer.ts` (developer_search), `src/tools/alexandria.ts`
+(find_tools), `src/tools/monitor.ts` (the eight monitor_*),
+`src/tools/research.ts` (gov_search + the four research_*), `src/tools/agent.ts`
+(agent, agent_status), `src/tools/interact.ts` (interact, interact_stop) and
+`src/tools/ops.ts` (credit_usage, feedback) through `src/api.ts` + `src/tool.ts`;
+`bun run typecheck`, `bun run bundle` and `bun test` pass.
 
 ## 1. What this is
 
@@ -82,7 +84,7 @@ Alexandria is fully reachable from the essential set:
 to get suggested tools), so the paid-data surface never needs a discoverable
 tool as its entry point.
 
-### 3.2 Discoverable (22) — not implemented yet
+### 3.2 Discoverable (22) — implemented
 
 | Family | Tools |
 | --- | --- |
@@ -434,9 +436,11 @@ it was given, and do not record fixtures for the whole surface.
 
 ## 9. Open questions
 
-- `firecrawl_interact` url mode: confirm on a live scrape that
-  `metadata.scrapeId` is populated for a plain scrape. If not, ship only the
-  `scrapeId` mode and move url mode to §6.
+- `firecrawl_interact` url mode: shipped with a guard — url mode scrapes first
+  and fails with a `ToolError` naming `metadata.scrapeId` when a plain scrape
+  does not carry it. Still confirm on a live scrape that `metadata.scrapeId` is
+  populated for a plain scrape; if it is not, drop url mode to §6 and keep only
+  the `scrapeId` mode.
 - Essential-set size: five tools is the current budget. If real sessions show
   the model failing to find `map`/`crawl`, promote one tool at a time and
   record the prompt cost here.

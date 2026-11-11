@@ -1,7 +1,8 @@
 /**
- * `firecrawl_scrape` / `firecrawl_parse` behavior: mutually exclusive modes,
- * path resolution, and the raw-markdown result exception (`AGENTS.md` §4.2,
- * §5.1, §5.3). The SDK client is stubbed, so nothing here touches the network.
+ * `firecrawl_scrape` / `firecrawl_parse` / `firecrawl_crawl` behavior:
+ * mutually exclusive modes, path resolution, the raw-markdown result
+ * exception, and the crawl waiter option mapping (`AGENTS.md` §4.2, §5.1,
+ * §5.3, §5.4). The SDK client is stubbed, so nothing here touches the network.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -9,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "@oh-my-pi/pi-coding-agent";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import { JobTimeoutError } from "firecrawl";
 import { api } from "../api";
 import { registerContentTools } from "./content";
 
@@ -198,5 +200,47 @@ describe("firecrawl_search", () => {
 		expect(seenQuery).toBe("latest bun release");
 		expect(seenOptions).toEqual({ limit: 3, sources: ["web"] });
 		expect(text(result)).toBe('{"web":[{"url":"https://example.com","title":"Example"}]}');
+	});
+});
+
+describe("firecrawl_crawl waiter", () => {
+	test("defaults the waiter deadline to 600s and hands the abort signal to the SDK natively", async () => {
+		let seenUrl: unknown;
+		let seenOptions: Record<string, unknown> = {};
+		stub("crawl", async (url: unknown, options: Record<string, unknown>) => {
+			seenUrl = url;
+			seenOptions = options;
+			return { id: "job_1", status: "completed", total: 1, completed: 1, data: [] };
+		});
+
+		const controller = new AbortController();
+		const result = await tool("firecrawl_crawl").execute(
+			"1",
+			{ url: "https://example.com/docs", limit: 5, includePaths: ["/docs"] },
+			controller.signal,
+		);
+
+		expect(result.isError).toBeUndefined();
+		expect(seenUrl).toBe("https://example.com/docs");
+		expect(seenOptions).toEqual({ limit: 5, includePaths: ["/docs"], timeout: 600, signal: controller.signal });
+		expect(text(result)).toContain('"status":"completed"');
+	});
+
+	test("an explicit timeout overrides the default and a JobTimeoutError surfaces with its job id", async () => {
+		let seenOptions: Record<string, unknown> = {};
+		stub("crawl", async (_url: unknown, options: Record<string, unknown>) => {
+			seenOptions = options;
+			throw new JobTimeoutError("job_2", 30, "crawl");
+		});
+
+		const result = await tool("firecrawl_crawl").execute("1", {
+			url: "https://example.com",
+			timeout: 30,
+		});
+
+		expect(seenOptions.timeout).toBe(30);
+		expect(result.isError).toBe(true);
+		expect(text(result)).toContain("JOB_TIMEOUT");
+		expect(text(result)).toContain("jobId: job_2");
 	});
 });

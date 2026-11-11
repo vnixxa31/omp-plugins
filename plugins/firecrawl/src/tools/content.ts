@@ -1,16 +1,18 @@
 /**
- * Content tools: `firecrawl_scrape`, `firecrawl_search`, `firecrawl_parse`
- * (`AGENTS.md` §5.1–5.3).
+ * Content tools: `firecrawl_scrape`, `firecrawl_search`, `firecrawl_parse`,
+ * `firecrawl_map`, `firecrawl_crawl`, `firecrawl_check_crawl_status`
+ * (`AGENTS.md` §5.1–5.4).
  *
  * Schemas mirror the installed SDK option objects one field per option, minus
  * `integration`/`origin` (§2). The shim cannot express the SDK's
  * string-or-option-object unions, so those fields accept `{ type, … }` records
  * and the SDK calls carry a single cast at the boundary. Every SDK call goes
- * through `api()` and `withAbort()`; local validation failures throw
- * `ToolError` before any request leaves the process.
+ * through `api()` and `withAbort()` — except `crawl()`, the one method that
+ * accepts a signal natively — and local validation failures throw `ToolError`
+ * before any request leaves the process.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import type { AlexandriaCall, ParseOptions, ScrapeOptions, SearchRequest } from "firecrawl";
+import type { AlexandriaCall, CrawlOptions, MapOptions, ParseOptions, ScrapeOptions, SearchRequest } from "firecrawl";
 import { ToolError, api, withAbort } from "../api";
 import { defineTool, documentText } from "../tool";
 
@@ -300,5 +302,100 @@ Related devices: xd://firecrawl_credit_usage, xd://firecrawl_feedback.`,
 			const filename = filePath.split(/[\\/]/).pop() ?? filePath;
 			return withAbort(api().parse({ data: new Uint8Array(bytes), filename, contentType }, options as unknown as ParseOptions), signal);
 		},
+	});
+
+	const mapParameters = z.object({
+		url: z.string().describe("Root URL to map."),
+		search: z.string().describe("Return only URLs matching this search term.").optional(),
+		sitemap: z
+			.enum(["only", "include", "skip"])
+			.describe('Sitemap handling: "include" (default) also reads the sitemap, "only" uses the sitemap alone, "skip" ignores it.')
+			.optional(),
+		includeSubdomains: z.boolean().describe("Include URLs from subdomains of the root domain.").optional(),
+		ignoreQueryParameters: z.boolean().describe("Treat URLs that differ only in query parameters as the same URL.").optional(),
+		limit: z.number().describe("Maximum number of URLs to return.").optional(),
+		timeout: z.number().describe("Maximum time for the map request, in milliseconds.").optional(),
+		location: z
+			.object({
+				country: z.string().describe('ISO country code to map from, e.g. "us".').optional(),
+				languages: z.array(z.string()).describe('Language codes to localize results to, e.g. ["en", "de"].').optional(),
+			})
+			.describe("Location settings for the map.")
+			.optional(),
+		threatProtection: threatProtectionField,
+		auditMetadata: auditMetadataField,
+	});
+
+	defineTool(pi, {
+		name: "firecrawl_map",
+		label: "Firecrawl map",
+		description: `Enumerate a website's indexed URLs without fetching the content of each page.
+Use it to find the right page across a site before scraping, or to inventory its structure.
+Scope with \`search\`, \`sitemap\` mode, \`includeSubdomains\`, and \`limit\`.
+Returns the map job id and \`links\` as { url, title? } objects; the id feeds \`firecrawl_feedback\`.`,
+		parameters: mapParameters,
+		approval: "read",
+		run: async ({ url, ...options }, signal) => withAbort(api().map(url, options as MapOptions), signal),
+	});
+
+	const crawlParameters = z.object({
+		url: z.string().describe("Root URL to start the crawl at."),
+		prompt: z.string().describe("Natural-language instruction guiding which pages the crawl takes and how it extracts them.").optional(),
+		excludePaths: z.array(z.string()).describe("URL path patterns to exclude from the crawl.").optional(),
+		includePaths: z.array(z.string()).describe("URL path patterns to crawl; everything else is skipped.").optional(),
+		maxDiscoveryDepth: z.number().describe("Maximum link depth from the root URL; the root itself is depth 0.").optional(),
+		sitemap: z
+			.enum(["skip", "include", "only"])
+			.describe('Sitemap handling: "skip" ignores it, "include" (default) also seeds from it, "only" crawls the sitemap alone.')
+			.optional(),
+		ignoreQueryParameters: z.boolean().describe("Treat URLs that differ only in query parameters as duplicates.").optional(),
+		deduplicateSimilarURLs: z.boolean().describe("Drop near-duplicate pages across the crawl.").optional(),
+		limit: z.number().describe("Maximum number of pages to scrape.").optional(),
+		crawlEntireDomain: z.boolean().describe("Crawl the whole domain of the root URL, not just its directory tree.").optional(),
+		allowExternalLinks: z.boolean().describe("Follow links that point to other domains.").optional(),
+		allowSubdomains: z.boolean().describe("Include subdomains of the root domain.").optional(),
+		ignoreRobotsTxt: z.boolean().describe("Crawl URLs even when robots.txt disallows them.").optional(),
+		robotsUserAgent: z.string().describe("User-agent the robots.txt rules are evaluated against.").optional(),
+		delay: z.number().describe("Delay between page requests, in seconds.").optional(),
+		maxConcurrency: z.number().describe("Maximum number of pages scraped in parallel.").optional(),
+		scrapeOptions: z.object(scrapeShape).describe("Scrape options applied to every crawled page (formats, actions, proxy, headers, …).").optional(),
+		regexOnFullURL: z.boolean().describe("Match include/exclude path patterns against the full URL instead of just the path.").optional(),
+		zeroDataRetention: z.boolean().describe("Process this crawl with zero data retention; must be enabled for your team.").optional(),
+		timeout: z
+			.number()
+			.describe("Waiter deadline for the whole crawl, in seconds; defaults to 600. Not a per-page timeout — on expiry the crawl keeps running and the error carries its job id.")
+			.optional(),
+	});
+
+	defineTool(pi, {
+		name: "firecrawl_crawl",
+		label: "Firecrawl crawl",
+		description: `Start a crawl at a root URL, poll it to a terminal state, and return the final job snapshot with the scraped pages.
+Bound it with include/exclude paths, depth, page limit, sitemap and subdomain flags; \`scrapeOptions\` applies to every page.
+Blocks until the crawl finishes or the waiter \`timeout\` (seconds, default 600) expires — aborting stops the polling and asks the API to cancel.
+Returns { id, status, total, completed, data }; a waiter timeout reports its jobId so firecrawl_check_crawl_status can keep watching.`,
+		parameters: crawlParameters,
+		approval: "write",
+		// `crawl()` is the only SDK method that accepts a signal: on abort the
+		// SDK stops polling and best-effort cancels the remote job (§5.4), so
+		// it is passed natively instead of racing through `withAbort`.
+		run: async ({ url, timeout, ...options }, signal) =>
+			api().crawl(url, { ...(options as unknown as CrawlOptions), timeout: timeout ?? 600, signal }),
+	});
+
+	const checkCrawlStatusParameters = z.object({
+		id: z.string().describe("Crawl job id returned by firecrawl_crawl or a prior status read."),
+	});
+
+	defineTool(pi, {
+		name: "firecrawl_check_crawl_status",
+		label: "Firecrawl check crawl status",
+		description: `Read the current status, progress, and collected results of an existing Firecrawl crawl job.
+Use it on a crawl id from another session; this call never starts, resumes, or modifies a crawl.
+Single read with no waiting: a \`scraping\` status means call again later.
+Returns { id, status, total, completed, data } plus creditsUsed when the API gives it.`,
+		parameters: checkCrawlStatusParameters,
+		approval: "read",
+		run: async ({ id }, signal) => withAbort(api().getCrawlStatus(id), signal),
 	});
 }

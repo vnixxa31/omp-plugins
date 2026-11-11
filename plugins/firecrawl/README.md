@@ -9,12 +9,10 @@ AGPL-3.0-or-later. See `LICENSE.md`.
 
 ## Status
 
-The five essential tools are implemented and registered on every session:
+All 27 tools are implemented: the five essentials registered on every session —
 `firecrawl_search`, `firecrawl_scrape`, `firecrawl_parse`,
-`firecrawl_developer_search`, `firecrawl_find_tools`.
-
-The 22 discoverable tools listed below are specified but not built yet; they
-arrive one family at a time (`AGENTS.md` §3.2, §4).
+`firecrawl_developer_search`, `firecrawl_find_tools` — plus the 22 discoverable
+tools below, mounted as `xd://` devices (`AGENTS.md` §3.2, §4).
 
 ## Install
 
