@@ -7,6 +7,15 @@ transport, no child process, no hand-written HTTP client.
 
 AGPL-3.0-or-later. See `LICENSE.md`.
 
+## Status
+
+The five essential tools are implemented and registered on every session:
+`firecrawl_search`, `firecrawl_scrape`, `firecrawl_parse`,
+`firecrawl_developer_search`, `firecrawl_find_tools`.
+
+The 22 discoverable tools listed below are specified but not built yet; they
+arrive one family at a time (`AGENTS.md` §3.2, §4).
+
 ## Install
 
 Once published to the `omp-plugins` marketplace:
@@ -72,6 +81,13 @@ plugins/firecrawl/
   src/tools/            # one module per tool family
   AGENTS.md             # architecture, surface policy, per-tool contracts
   LICENSE.md
+```
+
+```
+bun install          # firecrawl SDK + dev-only host types
+bun run typecheck    # tsc --noEmit
+bun run bundle       # bun build src/index.ts --outdir dist --target bun
+bun test             # offline; FIRECRAWL_LIVE=1 for the live checks
 ```
 
 `AGENTS.md` is the source of truth for what each tool must do and which SDK

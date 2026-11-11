@@ -1,9 +1,11 @@
 # AGENTS.md — Firecrawl tools for omp
 
-**Status (2026-11-10): spec only.** `src/index.ts` is still the session-1
-scaffold and `src/tools/` is empty. This file is the authority for what the
-plugin must become; do not infer contracts from the scaffold or from the old
-MCP README.
+**Status (2026-11-10): the five essential tools are implemented.** `src/index.ts`
+registers `src/tools/content.ts` (scrape, search, parse), `src/tools/developer.ts`
+(developer_search) and `src/tools/alexandria.ts` (find_tools) through
+`src/api.ts` + `src/tool.ts`; `bun run typecheck`, `bun run bundle` and
+`bun test` pass. The 22 discoverable tools in §3.2 are still spec-only — do not
+assume they exist, and do not infer contracts from the old MCP README.
 
 ## 1. What this is
 
@@ -80,7 +82,7 @@ Alexandria is fully reachable from the essential set:
 to get suggested tools), so the paid-data surface never needs a discoverable
 tool as its entry point.
 
-### 3.2 Discoverable (22)
+### 3.2 Discoverable (22) — not implemented yet
 
 | Family | Tools |
 | --- | --- |
@@ -254,6 +256,12 @@ prefer one. `requestId` may be passed to the Alexandria overload and reused
 with an identical payload when retrying. Per-provider errors are data, not
 tool failures: return them and let the caller retry just the failed providers.
 
+Implementation note: omptype refuses `union([object, array(object)])` at build
+time ("overlapping morph inputs"), so `alexandria` is declared as
+`z.unknown()` with the contract in its description and each call is validated
+against the `AlexandriaCall` schema inside `run`. `requestId` with `url` is a
+tool error, not a silent drop.
+
 ### 5.2 `firecrawl_search`
 
 - `sources` includes `alexandria` to get provider suggestions in
@@ -379,7 +387,7 @@ Other gaps inherited from the SDK (documented, not worked around):
 
 ## 7. Verification
 
-Tooling (decided; apply when the tools land):
+Tooling (applied):
 
 - `package.json` devDependencies: `typescript`, `@types/bun`,
   `@oh-my-pi/pi-coding-agent@18.18.x`, `@oh-my-pi/omptype@18.18.x` (dev-only,
@@ -387,17 +395,20 @@ Tooling (decided; apply when the tools land):
   the `ExtensionAPI` types come from the host).
 - Scripts: `typecheck` (`tsc --noEmit`), `bundle` (`bun build src/index.ts
   --outdir dist --target bun`), `test` (`bun test`).
-- `tsconfig.json`: `strict`, `noEmit`, `module: "esnext"`, `moduleResolution:
-  "bundler"`, `types: ["bun"]`.
+- `tsconfig.json`: `strict`, `noEmit`, `module: "Preserve"`, `moduleResolution:
+  "bundler"`, `resolveJsonModule` (for the `package.json` version import),
+  `types: ["bun"]`.
 
 Checks, in order:
 
 1. `bun install && bun run typecheck && bun run bundle`
 2. `omp plugin link .` then `omp plugin doctor` (0 errors) and
    `omp plugin list --json` shows the extension.
-3. Real session with a key: one essential tool and one discoverable tool
+3. Real session with a key: an essential tool dispatches
+   (`omp -p --tools=firecrawl_find_tools …`). The `xd://` half of this check
+   starts applying when the first discoverable tool lands
    (`read xd://firecrawl_credit_usage`, then `write xd://firecrawl_credit_usage`
-   with `{}`) to prove both presentation modes dispatch.
+   with `{}`).
 4. `FIRECRAWL_LIVE=1 bun test` runs the optional live checks; the default
    `bun test` run is offline.
 
