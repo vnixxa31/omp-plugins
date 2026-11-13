@@ -12,6 +12,16 @@
 			"tags": ["firecrawl", "web", "search", "scrape", "research"],
 			"homepage": "https://github.com/firecrawl/firecrawl-mcp-server",
 			"version": "0.1.0"
+		},
+		{
+			"name": "colgrep",
+			"description": "Native omp tools for colgrep semantic code search: ranked code-unit search and local code localization — no shell greps.",
+			"source": "./plugins/colgrep",
+			"author": { "name": "Violet Nixxa" },
+			"license": "AGPL-3.0-or-later",
+			"category": "development",
+			"tags": ["search", "semantic", "code-search", "colgrep"],
+			"version": "0.1.0"
 		}
 	]
 }
